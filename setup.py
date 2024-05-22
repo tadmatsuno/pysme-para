@@ -6,7 +6,7 @@ setuptools.setup(
     description='pysme-para.',
     url='https://github.com/MingjieJian/pysme-para.git',
     author='Mingjie Jian',
-    author_email='ssaajianmingjie@gmail.com',
+    author_email='jian-mingjie@outlook.com',
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

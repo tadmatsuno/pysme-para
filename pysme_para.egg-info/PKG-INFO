@@ -1,0 +1,14 @@
+Metadata-Version: 2.1
+Name: pysme-para
+Version: 0.0.1
+Summary: pysme-para.
+Home-page: https://github.com/MingjieJian/pysme-para.git
+Author: Mingjie Jian
+Author-email: jian-mingjie@outlook.com
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Framework :: IPython
+Classifier: Operating System :: OS Independent
+Classifier: Development Status :: 2 - Pre-Alpha
+Classifier: Topic :: Scientific/Engineering :: Astronomy
+Requires-Python: >=3.5
