@@ -108,13 +108,14 @@ def get_line_group(line_list, ele, overwrite=False, line_group_thres=1, line_mas
     for atom in tqdm(tar_e_index, desc=f'Grouping element {ele}'):
         line_group_single = []
         tar_e_list_single = tar_e_list[tar_e_list['species'] == atom]
-        for i in tqdm(range(len(tar_e_list_single)-1), desc=f'Grouping {atom} lines'):
+        for i in tqdm(range(np.max([1, len(tar_e_list_single)-1])), desc=f'Grouping {atom} lines'):
             if i == 0:
                 line_group_single.append([tar_e_list_single.index[i]])
-            if np.abs(tar_e_list_single._lines.iloc[i+1]['wlcent'] - tar_e_list_single._lines.iloc[i]['wlcent']) < line_group_thres:
-                line_group_single[-1].append(tar_e_list_single.index[i+1])
-            else:
-                line_group_single.append([tar_e_list_single.index[i+1]])
+            if len(tar_e_list_single) > 1:
+                if np.abs(tar_e_list_single._lines.iloc[i+1]['wlcent'] - tar_e_list_single._lines.iloc[i]['wlcent']) < line_group_thres:
+                    line_group_single[-1].append(tar_e_list_single.index[i+1])
+                else:
+                    line_group_single.append([tar_e_list_single.index[i+1]])
 
             line_group[atom] = [[i] for i in line_group_single]
 
@@ -259,7 +260,7 @@ def plot_average_abun(abun_all, line_group, average_ions, average_values, averag
             plt.scatter([0], abun_all[0][0], zorder=0, label=f'{ele_ion} line', c=f'C{int(ele_ion.split()[1])-1}')
 
     if standard_value is not None:
-        plt.axhline(standard_value, c='C3', label='Standard value', ls='--')
+        plt.axhline(standard_value, c='C3', label=f'Standard value: {standard_value:.2f}', ls='--')
     plt.axhline(average_values, label='Fitted value', ls='--')
     plt.axhspan(average_values-average_error, average_values+average_error, alpha=0.2, label='Fitted std')
 
@@ -323,7 +324,7 @@ def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, lin
         
         # Perform the chi^2 minimization for each useful lines
         res_all = {}
-        for ele_ion in line_group.keys():
+        for ele_ion in line_group_use.keys():
             res_all[ele_ion] = []
             for i in tqdm(range(len(line_group_use[ele_ion]))):
             # for i in [0,1,2]:
@@ -340,6 +341,7 @@ def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, lin
                 use_list = use_list[use_list_indices]
                 
                 res = abund_fit(wave_use, flux_use, flux_uncs_use, teff, logg, m_h, vmic, vmac, vsini, R, ele_ion.split()[0], abund, use_list, line_group_use[ele_ion][i], f"{result_folder}/{ele}/{ele_ion.replace(' ', '_')}")
+                line_group_use[ele_ion][i].append(res)
                 res_all[ele_ion].append(res)
         
         # Get the final average abundance for current element
@@ -362,16 +364,17 @@ def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, lin
         abun_all = [ele[sort_index] for ele in abun_all]
 
         abun_all = [np.array(i) for i in abun_all]
-        average_values = np.average(abun_all[0], weights=1 / abun_all[1]**2)
-        average_error = np.average((abun_all[0]-average_values)**2, weights=1 / abun_all[1]**2)
-        average_error = np.sqrt(average_error + 1 / np.sum(1 / abun_all[1]**2))
+        if len(abun_all) > 0:
+            average_values = np.average(abun_all[0], weights=1 / abun_all[1]**2)
+            average_error = np.average((abun_all[0]-average_values)**2, weights=1 / abun_all[1]**2)
+            average_error = np.sqrt(average_error + 1 / np.sum(1 / abun_all[1]**2))
 
-        if plot:
-            plot_average_abun(abun_all, line_group, average_ions, average_values, average_error, result_folder, standard_value=standard_values[ele_i])
+            if plot:
+                plot_average_abun(abun_all, line_group, average_ions, average_values, average_error, result_folder, standard_value=standard_values[ele_i])
 
-        # Update the abund
-        abund[ele] = average_values
+            # Update the abund
+            abund[ele] = average_values
 
         ele_i += 1
 
-    pass
+    return abund, line_group_use
