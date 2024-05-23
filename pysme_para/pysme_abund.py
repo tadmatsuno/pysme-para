@@ -304,13 +304,17 @@ def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, lin
             plt.figure()
             for key in line_group.keys():
                 precision = np.array([ele[1] for ele in line_group[key]])
-                plt.hist(precision, bins=int(np.ceil(np.ptp(precision) / 0.05)), label=f'{key} ({len(precision[precision < precision_thres])}/{len(precision)})', alpha=0.7)
+                if len(precision) > 1:
+                    plt.hist(precision, bins=int(np.ceil(np.ptp(precision) / 0.05)), label=f'{key} ({len(precision[precision < precision_thres])}/{len(precision)})', alpha=0.7)
+                elif len(precision) == 1:
+                    plt.hist(precision, label=f'{key} ({len(precision[precision < precision_thres])}/{len(precision)})', alpha=0.7)
 
             plt.axvline(precision_thres, color='red')
             plt.xlim(0, 0.5)
             plt.legend()
             plt.xlabel('Overall precision')
             plt.savefig(f'{result_folder}/{ele}/{ele}-precisions.pdf')
+            plt.close()
 
         # Select the lines with precision smaller than the threshold
         line_group_use = {}
