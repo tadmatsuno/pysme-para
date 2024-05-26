@@ -1,3 +1,5 @@
+.gitignore
+requirements.txt
 setup.py
 pysme_para/__init__.py
 pysme_para/pysme_abund.py
