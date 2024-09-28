@@ -16,6 +16,8 @@ import matplotlib.pyplot as plt
 
 import warnings
 
+from tqdm import tqdm
+
 warnings.simplefilter("ignore")
 
 # def generate_chunk_spectra(i, paras, nlte=False, strong=True, normalize_by_continuum=True, specific_intensities_only=False):
@@ -311,6 +313,9 @@ def batch_synth_simple(sme, line_list, strong_list=None, strong_line_element=['H
         sub_wave_range[i+1][0] = sub_wave_range[i][1]
     sub_wave_range[0][0] = sme.wave[0][0] - 1e-3
     sub_wave_range[-1][-1] = sme.wave[0][-1] + 1e-3
+
+    # Remove the wave ranges with no sme.wave inside 
+    sub_wave_range = [ele for ele in sub_wave_range if len(sme.wave[0][(sme.wave[0] >= ele[0]) & (sme.wave[0] < ele[1])]) > 0]
     
     sub_line_list = []
     for (wav_start, wav_end) in sub_wave_range:
@@ -323,15 +328,19 @@ def batch_synth_simple(sme, line_list, strong_list=None, strong_line_element=['H
     N_chunk = len(sub_wave_range)
 
     sub_sme = []
-    for i in range(N_chunk):
+    for i in tqdm(range(N_chunk)):
         sub_sme.append(deepcopy(sme))
         sub_sme[i].linelist = sub_line_list[i]
         sub_sme[i].wave = sme.wave[(sme.wave >= sub_wave_range[i][0]) & (sme.wave < sub_wave_range[i][1])]
         if not parallel:
             sub_sme[i] = synthesize_spectrum(sub_sme[i])
 
+    print(''.join([f'{sub_wave_range[i][0]}, {sub_wave_range[i][1]}, {len(sub_line_list[i])}, {len(sub_sme[i].wave[0])}\n' for i in range(len(sub_wave_range))]))
     if parallel:
         sub_sme = pqdm(sub_sme, synthesize_spectrum, n_jobs=n_jobs)
+
+    # import pickle
+    # pickle.dump(sub_sme, open(''))
 
     # Merge the spectra
     wav, flux = np.concatenate([sub_sme[i].wave[0] for i in range(N_chunk)]), np.concatenate([sub_sme[i].synth[0] for i in range(N_chunk)])
