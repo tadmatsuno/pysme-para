@@ -12,7 +12,7 @@ def select_lines(spectra, Teff, vald, purity_crit, fwhm, SNR, verbose=False):
 
     '''
     input:
-    ** full_sp: DataFrame containing a column 'wave' with the wavelengths, 'flux_all' with the full spectrum of a star (all the elements, all the molecules, blends etc) and 'flux_el' with the spectrum of a given element only, computed in a similar way as flux_all (in order to have the same continuum opacities)
+    ** spectra: pandas.DataFrame containing a column 'wave' with the wavelengths, 'flux_all' with the full spectrum of a star (all the elements, all the molecules, blends etc) and 'flux_el' with the spectrum of a given element only, computed in a similar way as flux_all (in order to have the same continuum opacities)
     ** Teff: Effective Teff, used in Boltzmann equation. 
     ** vald: pandas Dataframe containing the vald line-parameters for the target element only (ll, Echi, loggf) -- (Echi in eV)
     ** purity_crit: minimum required purity to keep the line
@@ -23,7 +23,7 @@ def select_lines(spectra, Teff, vald, purity_crit, fwhm, SNR, verbose=False):
     
     returns: 
     one panda sdata frame, with the following columns:
-    ** ll : central wavelength where either side of the line has a putiry higher than purity_crit
+    ** wlcent : central wavelength where either side of the line has a putiry higher than purity_crit
     ** Blueratio: Purity of the line, defined as the ratio of the element spectrum and the full spectrum at lambda0-1.5xFWHM. 
     ** Redratio : Purity of the line, defined as the ratio of the element spectrum and the full spectrum at lambda0+1.5xFWHM. 
     ** Fullratio: Purity of the line, defined as the ratio of the element spectrum and the full spectrum at lambda0+/-1.5xFWHM. 
