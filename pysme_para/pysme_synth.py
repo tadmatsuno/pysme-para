@@ -100,5 +100,3 @@ def batch_synth_simple(sme, line_list, strong_list=None, strong_line_element=['H
             raise ValueError
         
         return wav, flux, sub_line_list, sub_wave_range
-
-        
