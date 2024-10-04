@@ -29,7 +29,7 @@ def find_strong_lines(line_list, strong_line_element=['H', 'Mg', 'Ca', 'Na']):
             
     return line_list[~strong_indices], line_list[strong_indices]
 
-def batch_synth_simple(sme, line_list, strong_list=None, strong_line_element=['H', 'Mg', 'Ca', 'Na'], batch_mode='line', wav_range=2, N_line_chunk=2000, line_margin=2, strong_line_margin=100, parallel=False, n_jobs=5):
+def batch_synth_simple(sme, line_list, strong_list=None, strong_line_element=['H', 'Mg', 'Ca', 'Na'], batch_mode='line', wav_range=2, N_line_chunk=2000, line_margin=2, strong_line_margin=100, parallel=False, n_jobs=5, pysme_out=False):
     '''
     The function to synthize the spectra using pysme in batch. This would work faster than doing the whole spectra at once.
     For the synthesize accuracy, the code will separate the strong lines from the line list if strong_line is None, and
@@ -88,10 +88,18 @@ def batch_synth_simple(sme, line_list, strong_list=None, strong_line_element=['H
             sub_sme[i].linelist = sub_line_list[i]
             sub_sme[i].wave = sme.wave[(sme.wave >= sub_wave_range[i][0]) & (sme.wave < sub_wave_range[i][1])]
             if not parallel:
-                sub_sme[i] = synthesize_spectrum(sub_sme[i])
+                if pysme_out:
+                    sub_sme[i] = synthesize_spectrum(sub_sme[i])
+                else:
+                    with redirect_stdout(open(f"/dev/null", 'w')):
+                        sub_sme[i] = synthesize_spectrum(sub_sme[i])
 
         if parallel:
-            sub_sme = pqdm(sub_sme, synthesize_spectrum, n_jobs=n_jobs)
+            if pysme_out:
+                sub_sme = pqdm(sub_sme, synthesize_spectrum, n_jobs=n_jobs)
+            else:
+                with redirect_stdout(open(f"/dev/null", 'w')):
+                    sub_sme = pqdm(sub_sme, synthesize_spectrum, n_jobs=n_jobs)
 
         # Merge the spectra
         wav, flux = np.concatenate([sub_sme[i].wave[0] for i in range(N_chunk)]), np.concatenate([sub_sme[i].synth[0] for i in range(N_chunk)])
