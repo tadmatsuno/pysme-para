@@ -15,6 +15,8 @@ import warnings
 
 from tqdm import tqdm
 
+from contextlib import redirect_stdout
+
 warnings.simplefilter("ignore")
 
 def find_strong_lines(line_list, strong_line_element=['H', 'Mg', 'Ca', 'Na']):
