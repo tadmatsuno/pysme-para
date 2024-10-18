@@ -105,8 +105,21 @@ def batch_synth_simple(sme, line_list, strong_list=None, strong_line_element=['H
 
         # Merge the spectra
         wav, flux = np.concatenate([sub_sme[i].wave[0] for i in range(N_chunk)]), np.concatenate([sub_sme[i].synth[0] for i in range(N_chunk)])
+
+        # Get the central depth
+        for i in range(N_chunk):
+            sub_line_list[i] = sub_sme[i].linelist
+
+        stack_linelist = deepcopy(sub_line_list[0])
+        stack_linelist._lines = pd.concat([ele._lines for ele in sub_line_list])
+        stack_linelist._lines = stack_linelist._lines.drop_duplicates(subset=['species', 'wlcent', 'gflog', 'excit'])
+        stack_linelist._lines = stack_linelist._lines.reset_index(drop=True)
+        # Remove 
+        if 'central_depth' in line_list.columns:
+            line_list._lines = line_list._lines.drop('central_depth', axis=1)
+        line_list._lines = pd.merge(line_list._lines, stack_linelist._lines[['species', 'wlcent', 'gflog', 'excit', 'central_depth']], on=['species', 'wlcent', 'gflog', 'excit'], how='left')
         
         if np.all(wav != sme.wave[0]):
             raise ValueError
         
-        return wav, flux, sub_line_list, sub_wave_range
+        return wav, flux, line_list, sub_line_list, sub_wave_range

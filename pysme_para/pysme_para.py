@@ -8,7 +8,7 @@ from pysme.synthesize import synthesize_spectrum
 from pysme.solve import solve
 from copy import copy
 
-def select_lines(spectra, Teff, vald, purity_crit, fwhm, SNR, verbose=False):
+def select_lines(spectra, Teff, vald, purity_crit, fwhm, SNR, verbose=False, select_mode='depth'):
 
     '''
     input:
@@ -40,18 +40,21 @@ def select_lines(spectra, Teff, vald, purity_crit, fwhm, SNR, verbose=False):
     
     2) Does a x-match with the vald linelist. 
     When several VALD lines are within +/- 1 pixel from the derived line core, 
-    the line that has the highest value of the boltzmann equation is selected.
-    ==>log(Boltzmann): log(N)=log(A) -(E_chi/kT)+log(gf)
-        log(A) is a constant we can neglect
-        loggf is in vald
-        T is the temperature of the star
-        E_chi is the excitation potential 
-    
-    ==> Caution: By using Boltzmann equation to select the lines,we assume that for a given element, 
-        all of the lines correspond to the same ionisation level. If this is not the case, 
-        we need to involve Saha's equation too. This is not implemented yet. 
-    ==> Additional Caution: when there is hyperfine structure, then the lambda of Vald that we will 
-        find is not necessarily the center of the line we will be seeing
+    the line that has: 
+      a) the highest line centeral_depth (select_mode is set to 'depth'), or
+      b) the highest value of the boltzmann equation  (select_mode is set to 'boltz'),
+        is selected.
+        ==>log(Boltzmann): log(N)=log(A) -(E_chi/kT)+log(gf)
+            log(A) is a constant we can neglect
+            loggf is in vald
+            T is the temperature of the star
+            E_chi is the excitation potential 
+        
+        ==> Caution: By using Boltzmann equation to select the lines,we assume that for a given element, 
+            all of the lines correspond to the same ionisation level. If this is not the case, 
+            we need to involve Saha's equation too. This is not implemented yet. 
+        ==> Additional Caution: when there is hyperfine structure, then the lambda of Vald that we will 
+            find is not necessarily the center of the line we will be seeing
 
     3) Estimates the depth of the line and compares it to Careyl's formula. sigma_fmin = 1.5/SNR_resol 
     If the depth of the line is large enough to be seen at a given SNR, then the line is selected. 
@@ -63,6 +66,7 @@ def select_lines(spectra, Teff, vald, purity_crit, fwhm, SNR, verbose=False):
     Note: we require that if ratio<0.8 then we must have at least two pixels of the total spectrum with flux>0.9 within 1.5 FWHM,
     
     History: 
+    04 Oct. 2024: modify the code to support line selection by line central_depth. - MJ
     10 Jun. 2024: modify the code to support pysme VALD linelist format input (not compatible to pandas.DataFrame). - MJ
     20 Apr. 2023: replaced np.argmin (deprecated) with idxmin, that caused code to crash for machines with updated numpy - GK
     10 Feb. 2023: Curated the Code - GK
@@ -75,11 +79,10 @@ def select_lines(spectra, Teff, vald, purity_crit, fwhm, SNR, verbose=False):
     def _consecutive(data, stepsize=1):
         return np.split(data, np.where(np.diff(data) != stepsize)[0]+1)
     
-    #verifying that the wavelength arrays of the two spectra are the same
+    # Assign the wavelength array to ll.
     ll = spectra['wave'].values
 
-    depth=1.-3.*(1.5/SNR) # for a 3sigma detection. Based on Careyl's 1988 formula
-    #print('DEPTH:',depth)
+    depth = 1.-3.*(1.5/SNR) # for a 3sigma detection. Based on Careyl's 1988 formula
 
     # Blindly identify the line's position based on the derivatives. 
     # Take the derivative to find the zero crossings which correspond to
@@ -103,15 +106,15 @@ def select_lines(spectra, Teff, vald, purity_crit, fwhm, SNR, verbose=False):
         absorption_inds = [spectra['flux_el'][inds].idxmin() for inds in line_inds_grouped]
     else:
         absorption_inds = []
-    absorption_ind=np.array(absorption_inds)
+    absorption_ind = np.array(absorption_inds)
     
     # We select the lines that are deep enough to be detected
-    zz0=np.where((spectra['flux_el'].iloc[absorption_ind]<=depth)) [0]  
-    zz=absorption_ind[zz0]
+    zz0 = np.where((spectra['flux_el'].iloc[absorption_ind]<=depth)) [0]  
+    zz = absorption_ind[zz0]
     
     # BOLTZMANN METHOD 
     kboltzmann = 8.61733034e-5 # in eV/K
-    vald_centers_preliminary=np.zeros(len(zz))
+    vald_centers_preliminary = []
     
     # contains the wavelengths (at the pixels) where the first derivative is null and the second is positive
     
@@ -120,16 +123,25 @@ def select_lines(spectra, Teff, vald, purity_crit, fwhm, SNR, verbose=False):
         myvald = np.where((vald['wlcent'] >= ll[zz[j]] - 0.5*fwhm) & (vald['wlcent'] <= ll[zz[j]] + 0.5*fwhm))[0]
         
         if len(myvald) > 1:
-            myBoltzmann = -vald['excit'][myvald] / (kboltzmann*Teff) + vald['gflog'][myvald]
-            mysel = np.where(myBoltzmann == np.max(myBoltzmann))[0]
-            vald_centers_preliminary[j] = vald['wlcent'][myvald[mysel[0]]]
-            if verbose: print(ll[zz[j]],'len(myvald)>1', vald['wlcent'][myvald[mysel[0]]])
-        else:
+            if select_mode == 'boltz':
+                myBoltzmann = -vald['excit'][myvald] / (kboltzmann*Teff) + vald['gflog'][myvald]
+                mysel = np.where(myBoltzmann == np.max(myBoltzmann))[0]
+                vald_centers_preliminary.append(vald['wlcent'][myvald[mysel[0]]])
+                if verbose: print(ll[zz[j]],'len(myvald)>1', vald['wlcent'][myvald[mysel[0]]])
+            elif select_mode == 'depth':
+                mylist = vald._lines.loc[(vald._lines['wlcent'] >= ll[zz[j]] - 0.5*fwhm) & (vald._lines['wlcent'] <= ll[zz[j]] + 0.5*fwhm)]
+                idx = mylist['central_depth'].idxmax()
+                vald_centers_preliminary.append(mylist.loc[idx, 'wlcent'])
+            else:
+                raise ValueError("'select_mode' must be either 'depth' or 'boltz'.")
+        elif len(myvald) == 1:
             if verbose: print(ll[zz[j]],'-->',len(myvald))
             myvald = np.where(search == np.min(search))[0] # Note that this allows the center of the line to be out of the sampling. 
-            vald_centers_preliminary[j] = vald['wlcent'][myvald[0]]
+            vald_centers_preliminary.append(vald['wlcent'][myvald[0]])
             if verbose: print(len(myvald),vald['wlcent'][myvald[0]])
-    vald_unique, vald_unique_index = np.unique(vald_centers_preliminary, return_index=True)
+        else: 
+            if verbose: print(ll[zz[j]],'-->',len(myvald), ', skip.')
+    vald_unique, vald_unique_index = np.unique(np.array(vald_centers_preliminary), return_index=True)
 
     centers_index = zz[vald_unique_index]
     centers_ll = np.array(vald_unique) 
@@ -153,16 +165,21 @@ def select_lines(spectra, Teff, vald, purity_crit, fwhm, SNR, verbose=False):
         # two selections: blue (left) part of the line, red (right) part of the line
         window_sel_blue = np.where((ll >= centers_ll[j] - half_window_width) & (ll <= centers_ll[j]))[0]
         window_sel_red = np.where((ll <= centers_ll[j] + half_window_width) & (ll >= centers_ll[j]) )[0]
-
-        width_blue[j] = ll[window_sel_blue[0]] # this will be overwritten if criteria below are fulfilled. 
-        width_red[j] = ll[window_sel_red[-1]] # this will be overwritten if criteria below are fulfilled.
+        if len(window_sel_blue) > 0:
+            width_blue[j] = ll[window_sel_blue[0]] # this will be overwritten if criteria below are fulfilled.
+        else:
+            width_blue[j] = 0
+        if len(window_sel_red) > 0:
+            width_red[j] = ll[window_sel_red[-1]] # this will be overwritten if criteria below are fulfilled.
+        else:
+            width_red[j] = 0
 
         for ww in range(0,2): # loop on blue and red wing of the line
             if ww==0: mywindow=window_sel_blue #blue window
             if ww==1: mywindow=window_sel_red # red window
 
-            cont_crit= 1-(np.min(spectra['flux_el'][mywindow])*0.02) #(We are back to the continuum levels more or less 2% of the depth of the line)
-            cont_search=np.where(spectra['flux_el'][mywindow]>=cont_crit)[0]
+            cont_crit = (1 - np.min(spectra['flux_el'][mywindow])*0.02) #(We are back to the continuum levels more or less 2% of the depth of the line)
+            cont_search = np.where(spectra['flux_el'][mywindow] >= cont_crit)[0]
             
             full_continumm_search=np.where(spectra['flux_all'][mywindow]>=0.9)[0] # in order to establish the flags. We want the full spectrum to have a flux >0.9. And we search in a range of +/-1.5FWHM and not the width of the line. 
 
