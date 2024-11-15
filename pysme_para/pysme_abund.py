@@ -24,9 +24,7 @@ from astropy.constants import c
 
 from . import pysme_synth
 
-from copy import deepcopy
-
-import gc
+import time
 
 try:
     from IPython import get_ipython
@@ -125,7 +123,7 @@ def in_mask(wav, mask):
     else:
         return np.all([in_mask(wav_single, mask) for wav_single in wav])
 
-def get_line_group(line_list, ele, overwrite=False, line_group_thres=1, line_mask=None):
+def get_line_group(line_list, ele, R, overwrite=False, line_group_thres=2, line_mask=None, group_max_span=1):
     '''
     Group the lines with one element to groups, and calculate their senstivity spectra.
     '''
@@ -146,12 +144,11 @@ def get_line_group(line_list, ele, overwrite=False, line_group_thres=1, line_mas
         line_group_single = []
         tar_e_list_single = tar_e_list[tar_e_list['species'] == atom]
 
-
         for i in tqdm(range(np.max([1, len(tar_e_list_single)-1])), desc=f'Grouping {atom} lines'):
             if i == 0:
                 line_group_single.append([tar_e_list_single.index[i]])
             if len(tar_e_list_single) > 1:
-                if np.abs(tar_e_list_single._lines.iloc[i+1]['wlcent'] - tar_e_list_single._lines.iloc[i]['wlcent']) < line_group_thres:
+                if (np.abs(tar_e_list_single._lines.iloc[i+1]['wlcent'] - tar_e_list_single._lines.iloc[i]['wlcent']) < line_group_thres*tar_e_list_single._lines.iloc[i]['wlcent']/R) and (np.abs(tar_e_list_single._lines.loc[line_group_single[-1][0], 'wlcent'] - tar_e_list_single._lines.iloc[i]['wlcent']) <= group_max_span):
                     line_group_single[-1].append(tar_e_list_single.index[i+1])
                 else:
                     line_group_single.append([tar_e_list_single.index[i+1]])
@@ -209,7 +206,7 @@ def sensitive_spectra(line_group, line_list, stellar_paras, R, ref_spec=None, nj
             
     return line_group
 
-def abund_fit(ele, wav, flux, flux_uncs, R, teff, logg, m_h, vmic, vmac, vsini, abund, use_list, line_use, save_path, plot=True, atmo=None):
+def abund_fit(ele, wav, flux, flux_uncs, R, teff, logg, m_h, vmic, vmac, vsini, abund, use_list, line_use, save_path, plot=False, atmo=None):
 
     sme_fit = SME_Structure()
 
@@ -413,7 +410,7 @@ def plot_average_abun(abun_all, line_group, average_ions, average_values, averag
     plt.savefig(f'{result_folder}/{list(line_group.keys())[0].split()[0]}/{list(line_group.keys())[0].split()[0]}-fit.pdf')
     plt.close()
     
-def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, line_list, fit_ele, result_folder, line_list_strong=None, strong_line_element=['H', 'Mg', 'Ca', 'Na'], line_mask=None, abund=None, atmo=None, plot=True, precision_thres=0.2, average_ions=[1, 2], standard_values=None, max_N=None, abund_record=None, save=True, overwrite=True):
+def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, line_list, fit_ele, result_folder=None, line_list_strong=None, strong_line_element=['H', 'Mg', 'Ca', 'Na'], line_mask=None, abund=None, atmo=None, plot=False, precision_thres=0.2, average_ions=[1, 2], standard_values=None, max_N=None, abund_record=None, save=False, overwrite=False):
     '''
     The main function for determining abundances using pysme.
     Input: observed wavelength, normalized flux, teff, logg, [M/H], vmic, vmac, vsini, line_list, pysme initial abundance list, line mask of wavelength to be removed.
@@ -436,29 +433,36 @@ def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, lin
     if line_list_strong is None:
         line_list_no_strong, line_list_strong = pysme_synth.find_strong_lines(line_list, strong_line_element=strong_line_element)
 
-    # Create sub-folders for the star.
-    os.makedirs(f"{result_folder}/", exist_ok=True)
-    with redirect_stdout(open(f"{result_folder}/pysme-abun.log", 'w')):
-
+    if plot:
+        # Create sub-folders for the star.
+        os.makedirs(f"{result_folder}/", exist_ok=True)
+    if result_folder is None:
+        log_file = '/dev/null'
+    else:
+        log_file = f"{result_folder}/pysme-abun.log"
+    with redirect_stdout(open(log_file, 'w')):
         # Iterate for all the elements
         ele_i = 0
         for ele in fit_ele:
-            # Create sub-folders for each element.
-            os.makedirs(f"{result_folder}/{ele}/", exist_ok=True)
-            if overwrite:
-                # Remove all the files in each element folder.
-                files = os.listdir(f"{result_folder}/{ele}/")
-                for file in files:
-                    file_path = os.path.join(f"{result_folder}/{ele}/", file)
-                    
-                    # 检查是否是文件（排除子文件夹）
-                    if os.path.isfile(file_path):
-                        try:
-                            os.remove(file_path)
-                        except Exception as e:
-                            pass
+            if plot:
+                # Create sub-folders for each element.
+                os.makedirs(f"{result_folder}/{ele}/", exist_ok=True)
+                if overwrite:
+                    # Remove all the files in each element folder.
+                    files = os.listdir(f"{result_folder}/{ele}/")
+                    for file in files:
+                        file_path = os.path.join(f"{result_folder}/{ele}/", file)
+                        
+                        # 检查是否是文件（排除子文件夹）
+                        if os.path.isfile(file_path):
+                            try:
+                                os.remove(file_path)
+                            except Exception as e:
+                                pass
         
-            line_group = get_line_group(line_list, ele, line_mask=line_mask)
+            time_select_line_s = time.time()
+
+            line_group = get_line_group(line_list, ele, R, line_mask=line_mask)
             line_group = sensitive_spectra(line_group, line_list, [teff, logg, m_h, vmic, vmac, vsini, abund], R, njobs=5, ref_spec=[wave, flux, flux_err])
 
             # Select the lines with precision smaller than the threshold
@@ -495,10 +499,13 @@ def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, lin
                     plt.savefig(f'{result_folder}/{ele}/{ele}-precisions.pdf')
                     plt.close()
 
+            time_select_line_e = time.time()
+
             if line_group_len == 0:
                 # No good lines, return current abundnce as NaN.
+                print('No good lines.')
                 abund[ele] = np.nan
-                abund_record[ele] = [np.nan, np.nan]
+                abund_record[ele] = [np.nan, np.nan, time_select_line_e-time_select_line_s, np.nan]
                 ele_i += 1
                 continue
             
@@ -518,29 +525,9 @@ def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, lin
                     use_list._lines = linelist_df
                     use_list_indices = ((use_list['wlcent'] > line_group_use[ele_ion][i][0][0]-100) & (use_list['wlcent'] < line_group_use[ele_ion][i][0][1]+100))
                     use_list = use_list[use_list_indices]
-                    res = abund_fit(ele_ion.split()[0], wave[indices], flux[indices], flux_err[indices], R, teff, logg, m_h, vmic, vmac, vsini, copy(abund), use_list, line_group_use[ele_ion][i], f"{result_folder}/{ele}/{ele_ion.replace(' ', '_')}", atmo=atmo)
+                    res = abund_fit(ele_ion.split()[0], wave[indices], flux[indices], flux_err[indices], R, teff, logg, m_h, vmic, vmac, vsini, copy(abund), use_list, line_group_use[ele_ion][i], f"{result_folder}/{ele}/{ele_ion.replace(' ', '_')}", atmo=atmo, plot=plot)
                     line_group_use[ele_ion][i].append(res)
                     res_all[ele_ion].append(res)
-            
-            # res_all = {}
-            # for ele_ion in line_group_use.keys():
-            #     res_all[ele_ion] = []
-            #     for i in tqdm(range(len(line_group_use[ele_ion]))):
-            #     # for i in [5]:
-            #         indices = (wave > line_group_use[ele_ion][i][0][0] - 2) & (wave < line_group_use[ele_ion][i][0][1] + 2)
-            #         wave_use, flux_use, flux_uncs_use = wave[indices], flux[indices], flux_err[indices]
-                    
-            #         use_list_indices = (line_list_no_strong['wlcent'] > line_group_use[ele_ion][i][0][0]-2) & (line_list_no_strong['wlcent'] < line_group_use[ele_ion][i][0][1]+2)
-            #         use_list = line_list_no_strong[use_list_indices]
-            #         # Add strong lines
-            #         linelist_df = pd.concat([use_list._lines, line_list_strong._lines]).sort_values('wlcent')
-            #         use_list._lines = linelist_df
-            #         use_list_indices = ((use_list['wlcent'] > line_group_use[ele_ion][i][0][0]-100) & (use_list['wlcent'] < line_group_use[ele_ion][i][0][1]+100))
-            #         use_list = use_list[use_list_indices]
-                    
-            #         res = abund_fit(wave_use, flux_use, flux_uncs_use, teff, logg, m_h, vmic, vmac, vsini, R, ele_ion.split()[0], copy(abund), use_list, line_group_use[ele_ion][i], f"{result_folder}/{ele}/{ele_ion.replace(' ', '_')}")
-            #         line_group_use[ele_ion][i].append(res)
-            #         res_all[ele_ion].append(res)
             
             # Get the final average abundance for current element
             abun_result = {}
@@ -556,18 +543,17 @@ def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, lin
                     abun_all[3] += ['{:.3f}-{:.3f}$\mathrm{{\AA}}$'.format(*ele[0]) for ele in line_group_use[ele_ion]]
                     abun_all[4] += [int(ele_ion.split()[1])] * len(res_all[ele_ion])
 
+            time_chi2_e = time.time()
+
             # Sort the abun_all (for plotting)
             abun_all = [np.array(i) for i in abun_all]
             sort_index = abun_all[2].argsort()
             abun_all = [ele[sort_index] for ele in abun_all]
 
-            print(abun_all)
-
             abun_all = [np.array(i) for i in abun_all]
             if len(abun_all) > 0:
 
                 average_values = np.average(abun_all[0], weights=1 / abun_all[1]**2)
-                print(abun_all[0], average_values, abun_all[1])
                 average_error = np.average((abun_all[0]-average_values)**2, weights=1 / abun_all[1]**2)
                 average_error = np.sqrt(average_error + 1 / np.sum(1 / abun_all[1]**2))
 
@@ -578,40 +564,70 @@ def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, lin
                         plot_average_abun(abun_all, line_group, average_ions, average_values, average_error, result_folder)
                 # Update the abund
                 abund[ele] = average_values - m_h
-                abund_record[ele] = [average_values, average_error]
+                abund_record[ele] = [average_values, average_error, time_select_line_e-time_select_line_s, time_chi2_e-time_select_line_e]
 
             ele_i += 1
 
-        # Plot the final abundance and comparison
-        plt.figure(figsize=(14, 3))
-        plot_x = []
-        label_func1 = lambda x: 'standard abunds' if x == 0 else ''
-        label_func2 = lambda x: 'pysme abunds' if x == 0 else ''
-        
-        if standard_values is not None:
-            plt.scatter(range(len(fit_ele)), standard_values[0])
-        plt.scatter(range(len(fit_ele)), [abund_record[ele][0] for ele in fit_ele])
-        plt.ylim(plt.ylim())
-
-        j = 0
-        for ele in fit_ele:
-            plot_x.append(j)
+        if plot:
+            # Plot the final abundance and comparison
+            plt.figure(figsize=(14, 3))
+            plot_x = []
+            label_func1 = lambda x: 'standard abunds' if x == 0 else ''
+            label_func2 = lambda x: 'pysme abunds' if x == 0 else ''
+            
             if standard_values is not None:
-                plt.errorbar(j, standard_values[0][j],
-                            yerr=standard_values[1][j], fmt='.', alpha=0.7, label=label_func1(j), color='C0')
-            plt.errorbar(j, abund_record[ele][0], yerr=abund_record[ele][1], fmt='.', alpha=0.7, label=label_func2(j), color='C1')
-            j += 1
-        plt.xticks(plot_x, fit_ele)
-        plt.legend()
-        plt.ylabel('A(X)')
-        plt.tight_layout()
-        plt.savefig(f'{result_folder}/abund-result.pdf')
-        plt.close()
+                plt.scatter(range(len(fit_ele)), standard_values[0])
+            plt.scatter(range(len(fit_ele)), [abund_record[ele][0] for ele in fit_ele])
+            plt.ylim(plt.ylim())
+
+            j = 0
+            for ele in fit_ele:
+                plot_x.append(j)
+                if standard_values is not None:
+                    plt.errorbar(j, standard_values[0][j],
+                                yerr=standard_values[1][j], fmt='.', alpha=0.7, label=label_func1(j), color='C0')
+                plt.errorbar(j, abund_record[ele][0], yerr=abund_record[ele][1], fmt='.', alpha=0.7, label=label_func2(j), color='C1')
+                j += 1
+            plt.xticks(plot_x, fit_ele)
+            plt.legend()
+            plt.ylabel('A(X)')
+            plt.tight_layout()
+            plt.savefig(f'{result_folder}/abund-result.pdf')
+            plt.close()
+
+            plt.figure(figsize=(14, 3))
+            plot_x = []
+            label_func1 = lambda x: 'standard abunds error' if x == 0 else ''
+            label_func2 = lambda x: 'pysme abunds error' if x == 0 else ''
+
+            if standard_values is not None:
+                plt.scatter(range(len(fit_ele)), np.array([abund_record[ele][0] for ele in fit_ele]) - np.array(standard_values[0]), zorder=3)
+                plt.ylim(plt.ylim())
+                
+                j = 0
+                for ele in fit_ele:
+                    plot_x.append(j)
+                    if standard_values is not None:
+                        plt.errorbar(range(len(fit_ele)), np.array([abund_record[ele][0] for ele in fit_ele]) - np.array(standard_values[0]),
+                                    yerr=standard_values[1], fmt='.', alpha=0.7, label=label_func1(j), color='C0', zorder=1)
+                    plt.errorbar(range(len(fit_ele)), np.array([abund_record[ele][0] for ele in fit_ele]) - np.array(standard_values[0]), 
+                                yerr=[abund_record[ele][1] for ele in fit_ele], fmt='.', alpha=0.7, label=label_func2(j), color='C1', zorder=2)
+                    j += 1
+                plt.axhline(0, ls='--', color='brown')
+                plt.xticks(plot_x, fit_ele)
+                plt.legend()
+                plt.ylabel('A(X)$_\mathrm{measure}$ - A(X)$_\mathrm{standard}$')
+                plt.tight_layout()
+                plt.grid(zorder=0)
+            else:
+                plt.title('No standard value.')
+            plt.savefig(f'{result_folder}/diff-result.pdf')
+            plt.close()
 
         if save:
             pickle.dump([abund_record, abund], open(f'{result_folder}/abun_res.pkl', 'wb'))
             abun_res_df = pd.DataFrame(abund_record).T
-            abun_res_df.columns = ['A(X)', 'err_A(X)']
+            abun_res_df.columns = ['A(X)', 'err_A(X)', 'time_line_selection' ,'time_chi2']
             abun_res_df.to_csv(f'{result_folder}/abun_fit.csv')
 
     return abund_record, abund

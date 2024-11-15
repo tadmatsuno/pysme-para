@@ -235,12 +235,12 @@ def select_lines(spectra, Teff, vald, purity_crit, fwhm, SNR, verbose=False, sel
 
     return(myresult)
 
-def pysme_para_main(wav_obs, flux_obs, flux_err_obs, R, s_n, line_list, teff_init, logg_init, monh_init, vmic_init, vmac_init, vsini_init, ion_list=['Fe 1', 'Fe2'], spec_margin=0.2, linelist_margin=2):
+def pysme_para_main(wav_obs, flux_obs, flux_err_obs, R, s_n, line_list, teff_init, logg_init, monh_init, vmic_init, vmac_init, vsini_init, ion_list=['Fe 1', 'Fe 2'], spec_margin=0.2, linelist_margin=2):
     
     # Find all isolated Fe I and Fe II lines
     wav_start, wav_end = np.min(wav_obs), np.max(wav_obs)
+    
     sme = SME_Structure()
-
     sme.teff, sme.logg, sme.monh, sme.vmic, sme.vmac, sme.vsini = teff_init, logg_init, monh_init, vmic_init, vmac_init, vsini_init
     sme.iptype = 'gauss'
     sme.ipres = R
@@ -267,7 +267,6 @@ def pysme_para_main(wav_obs, flux_obs, flux_err_obs, R, s_n, line_list, teff_ini
                                     0.7, 0.2, s_n)
     
     # Select the Fe1 and Fe2 spectral regions, also the sub line list
-    
     indices_use_paras = wav_obs < 0
     indices_linelist_use_paras = line_list['wlcent'] < 0
     for i in selected_lines_fe1.index:
