@@ -17,6 +17,8 @@ from tqdm import tqdm
 
 from contextlib import redirect_stdout
 
+from joblib import Parallel, delayed
+
 warnings.simplefilter("ignore")
 
 def find_strong_lines(line_list, strong_line_element=['H', 'Mg', 'Ca', 'Na']):
@@ -67,7 +69,6 @@ def get_cdepth_range(sme, line_list, N_line_chunk=2000, parallel=False, n_jobs=5
             with redirect_stdout(open(f"/dev/null", 'w')):
                 sub_sme = pqdm(sub_sme, synthesize_spectrum, n_jobs=n_jobs)
 
-
     # Get the central depth
     for i in range(N_chunk):
         sub_line_list[i] = sub_sme[i].linelist
@@ -84,6 +85,11 @@ def get_cdepth_range(sme, line_list, N_line_chunk=2000, parallel=False, n_jobs=5
 
     # Manually change the depth of all H 1 lines to 1, to include them back.
     line_list._lines.loc[line_list['species'] == 'H 1', 'central_depth'] = 1 
+
+    # Manually change the 2000 line_range to 0.01.
+    indices = np.abs(line_list['line_range_e'] - line_list['line_range_s']-2000) < 0.1
+    line_list._lines.loc[indices, 'line_range_s'] = line_list._lines.loc[indices, 'wlcent']-0.005
+    line_list._lines.loc[indices, 'line_range_e'] = line_list._lines.loc[indices, 'wlcent']+0.005
 
     return line_list
 
@@ -197,7 +203,7 @@ def _batch_synth_line(sme, line_list, strong_list=None, strong_line_element=['H'
     
     return wav, flux, out_list, sub_line_list, sub_wave_range
 
-def batch_synth_line_range(sme, line_list, strong_list=None, N_line_chunk=2000, line_margin=2, strong_line_margin=100, parallel=False, n_jobs=5, pysme_out=False):
+def batch_synth_line_range(sme, line_list, N_line_chunk=2000, line_margin=2, parallel=False, n_jobs=5, pysme_out=False):
     '''
     The function to synthize the spectra using pysme in batch, according to the line_range of each line. This would work faster than doing the whole spectra at once.
     For the synthesize accuracy, the code will separate the strong lines from the line list if strong_line is None, and
@@ -245,36 +251,53 @@ def batch_synth_line_range(sme, line_list, strong_list=None, N_line_chunk=2000, 
             del sub_wave_range[i+1]
         i -= 1  
 
-    sub_line_list = []
-    for (wav_start, wav_end) in sub_wave_range:
-        line_list_sub = line_list[~((line_list['line_range_e'] < wav_start-line_margin) | (line_list['line_range_s'] > wav_end+line_margin))]
-        sub_line_list += [line_list_sub]
-
     N_chunk = len(sub_wave_range)
 
     sub_sme = []
+    args = []
     for i in tqdm(range(N_chunk)):
-        sub_sme.append(deepcopy(sme))
-        sub_sme[i].linelist = sub_line_list[i]
-        sub_sme[i].wave = sme.wave[(sme.wave >= sub_wave_range[i][0]) & (sme.wave < sub_wave_range[i][1])]
+        
+        line_wav_start, line_wav_end = sub_wave_range[i]
+        wav_start, wav_end = sub_wave_range[i][0], sub_wave_range[i][1]
+        args.append([sme, line_list, line_wav_start, line_wav_end, wav_start, wav_end, line_margin, pysme_out])
         if not parallel:
+            sub_sme = deepcopy(sme)
+            sub_sme.linelist = line_list[~((line_list['line_range_e'] < line_wav_start-line_margin) | (line_list['line_range_s'] > line_wav_end+line_margin))]
+            sub_sme.wave = sme.wave[(sme.wave >= wav_start) & (sme.wave < wav_end)]
             if pysme_out:
-                sub_sme[i] = synthesize_spectrum(sub_sme[i])
+                sub_sme = synthesize_spectrum(sub_sme)
             else:
                 with redirect_stdout(open(f"/dev/null", 'w')):
-                    sub_sme[i] = synthesize_spectrum(sub_sme[i])
+                    sub_sme = synthesize_spectrum(sub_sme)
+            if i == 0:
+                wav, flux = sub_sme.wave[0], sub_sme.synth[0]
+            else:
+                wav, flux = np.concatenate([wav, sub_sme.wave[0]]), np.concatenate([flux, sub_sme.synth[0]])
 
     if parallel:
-        if pysme_out:
-            sub_sme = pqdm(sub_sme, synthesize_spectrum, n_jobs=n_jobs)
-        else:
-            with redirect_stdout(open(f"/dev/null", 'w')):
-                sub_sme = pqdm(sub_sme, synthesize_spectrum, n_jobs=n_jobs)
+        results = Parallel(n_jobs=n_jobs, backend='loky')(delayed(synthesize_spectrum_pqdm)(*ele) for ele in tqdm(args))
+        wav = [item[0] for item in results]
+        wav = np.concatenate(wav)
+        flux = [item[1] for item in results]
+        flux = np.concatenate(flux)
 
     # Merge the spectra
-    wav, flux = np.concatenate([sub_sme[i].wave[0] for i in range(N_chunk)]), np.concatenate([sub_sme[i].synth[0] for i in range(N_chunk)])
-
     if np.all(wav != sme.wave[0]):
         raise ValueError
     
-    return wav, flux, sub_line_list, sub_wave_range
+    return wav, flux
+
+def synthesize_spectrum_pqdm(sme, line_list, line_wav_start, line_wav_end, wav_start, wav_end, line_margin, pysme_out):
+    sub_sme = deepcopy(sme)
+    sub_sme.linelist = line_list[~((line_list['line_range_e'] < line_wav_start-line_margin) | (line_list['line_range_s'] > line_wav_end+line_margin))]
+    sub_sme.wave = sme.wave[(sme.wave >= wav_start) & (sme.wave < wav_end)]
+    if pysme_out:
+        sub_sme = synthesize_spectrum(sub_sme)
+    else:
+        with redirect_stdout(open(f"/dev/null", 'w')):
+            sub_sme = synthesize_spectrum(sub_sme)
+    
+    wav, flux = sub_sme.wave[0], sub_sme.synth[0]
+    del sub_sme
+
+    return wav, flux

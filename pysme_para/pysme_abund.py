@@ -12,7 +12,7 @@ from pysme.abund import Abund
 
 from pqdm.processes import pqdm
 
-from copy import copy
+from copy import copy 
 import os, pickle, logging
 
 from tqdm import trange
@@ -166,7 +166,7 @@ def get_line_group(line_list, ele, R, overwrite=False, line_group_thres=2, line_
 
     return line_group
 
-def sensitive_spectra(line_group, line_list, stellar_paras, R, ref_spec=None, njobs=os.cpu_count()-3, parallel=True, line_range_ratio=3):
+def sensitive_spectra(line_group, line_list, stellar_paras, R, ref_spec=None, njobs=os.cpu_count()-3, parallel=True, line_margin=2):
     '''
     Get the sensitive spectra for each line group
     ''' 
@@ -180,7 +180,8 @@ def sensitive_spectra(line_group, line_list, stellar_paras, R, ref_spec=None, nj
             res = []
         for i in range(len(line_group[atom])):
             line_range_use = [line_group[atom][i][0], line_group[atom][i][1]]
-            indices = (line_list['wlcent'] > line_range_use[0]-2) & (line_list['wlcent'] < line_range_use[1]+2)
+            # indices = (line_list['wlcent'] > line_range_use[0]-2) & (line_list['wlcent'] < line_range_use[1]+2)
+            indices = ~((line_list['line_range_e'] < line_range_use[0]-line_margin) | (line_list['line_range_s'] > line_range_use[1]+line_margin))
             if ref_spec is None:
                 args_single = [*line_range_use, teff, logg, m_h, vmic, vmac, vsini, copy(abund), R, atom, line_list[indices]]
                 args.append(args_single)
@@ -410,7 +411,7 @@ def plot_average_abun(abun_all, line_group, average_ions, average_values, averag
     plt.savefig(f'{result_folder}/{list(line_group.keys())[0].split()[0]}/{list(line_group.keys())[0].split()[0]}-fit.pdf')
     plt.close()
     
-def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, line_list, fit_ele, result_folder=None, line_list_strong=None, strong_line_element=['H', 'Mg', 'Ca', 'Na'], line_mask=None, abund=None, atmo=None, plot=False, precision_thres=0.2, average_ions=[1, 2], standard_values=None, max_N=None, abund_record=None, save=False, overwrite=False):
+def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, line_list, fit_ele, result_folder=None, line_mask=None, abund=None, atmo=None, plot=False, precision_thres=0.2, average_ions=[1, 2], standard_values=None, max_N=None, abund_record=None, save=False, overwrite=False, line_margin=2):
     '''
     The main function for determining abundances using pysme.
     Input: observed wavelength, normalized flux, teff, logg, [M/H], vmic, vmac, vsini, line_list, pysme initial abundance list, line mask of wavelength to be removed.
@@ -429,9 +430,6 @@ def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, lin
         fit_ele = [fit_ele]
     elif type(fit_ele) != list:
         raise TypeError('fit_ele have to be either list or string.')
-
-    if line_list_strong is None:
-        line_list_no_strong, line_list_strong = pysme_synth.find_strong_lines(line_list, strong_line_element=strong_line_element)
 
     if plot:
         # Create sub-folders for the star.
@@ -516,15 +514,10 @@ def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, lin
                 res_all[ele_ion] = []
                 for i in tqdm(range(len(line_group_use[ele_ion]))):
                 # for i in tqdm([48, 49, 50]):
-                    indices = (wave > line_group_use[ele_ion][i][0][0] - 2) & (wave < line_group_use[ele_ion][i][0][1] + 2)
-                    
-                    use_list_indices = (line_list_no_strong['wlcent'] > line_group_use[ele_ion][i][0][0]-2) & (line_list_no_strong['wlcent'] < line_group_use[ele_ion][i][0][1]+2)
-                    use_list = line_list_no_strong[use_list_indices]
-                    # Add strong lines
-                    linelist_df = pd.concat([use_list._lines, line_list_strong._lines]).sort_values('wlcent')
-                    use_list._lines = linelist_df
-                    use_list_indices = ((use_list['wlcent'] > line_group_use[ele_ion][i][0][0]-100) & (use_list['wlcent'] < line_group_use[ele_ion][i][0][1]+100))
-                    use_list = use_list[use_list_indices]
+                    indices = (wave > line_group_use[ele_ion][i][0][0] - 2*line_group_use[ele_ion][i][0][0]/R) & (wave < line_group_use[ele_ion][i][0][1] + 2*line_group_use[ele_ion][i][0][1]/R)
+                    # 
+                    # use_list_indices = (line_list_no_strong['wlcent'] > line_group_use[ele_ion][i][0][0]-2) & (line_list_no_strong['wlcent'] < line_group_use[ele_ion][i][0][1]+2)
+                    use_list = use_list[~((line_list['line_range_e'] < line_group_use[ele_ion][i][0][0]-line_margin) | (line_list['line_range_s'] > line_group_use[ele_ion][i][0][1]+line_margin))]
                     res = abund_fit(ele_ion.split()[0], wave[indices], flux[indices], flux_err[indices], R, teff, logg, m_h, vmic, vmac, vsini, copy(abund), use_list, line_group_use[ele_ion][i], f"{result_folder}/{ele}/{ele_ion.replace(' ', '_')}", atmo=atmo, plot=plot)
                     line_group_use[ele_ion][i].append(res)
                     res_all[ele_ion].append(res)
