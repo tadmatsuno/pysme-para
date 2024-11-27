@@ -1,15 +1,11 @@
 import numpy as np
 import pandas as pd
 
-from pysme.sme import SME_Structure
-from pysme.abund import Abund
 from pysme.synthesize import synthesize_spectrum
 
 from pqdm.processes import pqdm
 from multiprocessing import cpu_count
 from copy import deepcopy
-
-import matplotlib.pyplot as plt
 
 import warnings
 
@@ -23,7 +19,7 @@ warnings.simplefilter("ignore")
 
 def find_strong_lines(line_list, strong_line_element=['H', 'Mg', 'Ca', 'Na']):
     '''
-    Find strong lines from the elements.
+    Find strong lines from the elements. This is not recommeded to use since it is limited to fixed elements.
     '''
     
     strong_indices = line_list['wlcent'] < 0
@@ -79,8 +75,9 @@ def get_cdepth_range(sme, line_list, N_line_chunk=2000, parallel=False, n_jobs=5
     # Remove
     if len(stack_linelist) != len(line_list):
         raise ValueError
-    if 'central_depth' in line_list.columns:
-        line_list._lines = line_list._lines.drop('central_depth', axis=1)
+    for column in ['central_depth', 'line_range_s', 'line_range_e']:
+        if column in line_list.columns:
+            line_list._lines = line_list._lines.drop(column, axis=1)
     line_list._lines = pd.merge(line_list._lines, stack_linelist._lines[['species', 'wlcent', 'gflog', 'excit', 'j_lo', 'e_upp', 'j_up', 'lande_lower', 'lande_upper', 'lande', 'gamrad', 'gamqst', 'gamvw', 'central_depth', 'line_range_s', 'line_range_e']], on=['species', 'wlcent', 'gflog', 'excit', 'j_lo', 'e_upp', 'j_up', 'lande_lower', 'lande_upper', 'lande', 'gamrad', 'gamqst', 'gamvw'], how='left')
 
     # Manually change the depth of all H 1 lines to 1, to include them back.
@@ -203,7 +200,7 @@ def _batch_synth_line(sme, line_list, strong_list=None, strong_line_element=['H'
     
     return wav, flux, out_list, sub_line_list, sub_wave_range
 
-def batch_synth_line_range(sme, line_list, N_line_chunk=2000, line_margin=2, parallel=False, n_jobs=5, pysme_out=False):
+def batch_synth(sme, line_list, N_line_chunk=2000, line_margin=2, parallel=False, n_jobs=5, pysme_out=False):
     '''
     The function to synthize the spectra using pysme in batch, according to the line_range of each line. This would work faster than doing the whole spectra at once.
     For the synthesize accuracy, the code will separate the strong lines from the line list if strong_line is None, and
@@ -256,7 +253,6 @@ def batch_synth_line_range(sme, line_list, N_line_chunk=2000, line_margin=2, par
     sub_sme = []
     args = []
     for i in tqdm(range(N_chunk)):
-        
         line_wav_start, line_wav_end = sub_wave_range[i]
         wav_start, wav_end = sub_wave_range[i][0], sub_wave_range[i][1]
         args.append([sme, line_list, line_wav_start, line_wav_end, wav_start, wav_end, line_margin, pysme_out])
