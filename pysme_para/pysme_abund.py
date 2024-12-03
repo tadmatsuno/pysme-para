@@ -54,7 +54,7 @@ def get_sensitive_synth(wave, R, teff, logg, m_h, vmic, vmac, vsini, line_list, 
     sme.ipres = R
     sme.abund = abund
     sme.wave = wave
-    spec_syn_all = pysme_synth.batch_synth_line_range(sme, line_list, parallel=True, n_jobs=10)
+    spec_syn_all = pysme_synth.batch_synth(sme, line_list, parallel=True, n_jobs=10)
 
     # Calculate the sensitive spectra for the fitting elements.
     spec_syn = {}
@@ -73,12 +73,12 @@ def get_sensitive_synth(wave, R, teff, logg, m_h, vmic, vmac, vsini, line_list, 
         sme.wave[0] = wave[wave_indices]
 
         if len(sme.wave[0]) > 2:
-            spec_syn_plus = pysme_synth.batch_synth_line_range(sme, line_list, parallel=True, n_jobs=10)
+            spec_syn_plus = pysme_synth.batch_synth(sme, line_list, parallel=True, n_jobs=10)
             flux_syn_plus[wave_indices] = spec_syn_plus[1]
         sme.abund = abund
         sme.abund[ele] -= 0.2
         if len(sme.wave[0]) > 2:
-            spec_syn_minus = pysme_synth.batch_synth_line_range(sme, line_list, parallel=True, n_jobs=10)
+            spec_syn_minus = pysme_synth.batch_synth(sme, line_list, parallel=True, n_jobs=10)
             flux_syn_minus[wave_indices] = spec_syn_minus[1]
         sme.abund[ele] += 0.1
 
@@ -87,7 +87,7 @@ def get_sensitive_synth(wave, R, teff, logg, m_h, vmic, vmac, vsini, line_list, 
             print(f'Running for {ele} {ion}.')
             flux_syn_ion[ion] = np.ones_like(wave)
             try:
-                spec_syn_ion = pysme_synth.batch_synth_line_range(sme, line_list[line_list['species'] == f'{ele} {ion}'], parallel=True, n_jobs=10)
+                spec_syn_ion = pysme_synth.batch_synth(sme, line_list[line_list['species'] == f'{ele} {ion}'], parallel=True, n_jobs=10)
                 flux_syn_ion[ion][wave_indices] = spec_syn_ion[1]
             except:
                 pass
