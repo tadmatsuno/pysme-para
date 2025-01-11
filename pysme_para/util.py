@@ -107,3 +107,15 @@ def measure_rv(wav_template, flux_template, wav_spec, flux_spec, ccf_out=False):
         return star_rv, rv_err, rv_raster, ccf
     else:
         return star_rv, rv_err
+
+def get_vmac(Teff, sp_type):
+    '''
+    Get the empirical Vmac from Gray 1984 (dwarf) and Gray 1982 (giant).
+    '''
+    Teff = np.asarray(Teff)
+    if sp_type == 'dwarf':
+        result = np.where(Teff > 4873, 3.95 * Teff/1000 - 19.25, 0)
+    elif sp_type == 'giant':
+        result = np.where(Teff < 5500, 7 - (5.5 - Teff/1000)**2.6, 7 + (Teff/1000 - 5.5)**2.6)
+    result[result < 0] = 0
+    return result

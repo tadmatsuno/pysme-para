@@ -17,7 +17,11 @@ setuptools.setup(
     ],
     python_requires=">=3.5",
     install_requires=[
-
+        "pysme-astro",
+        "pqdm",
+        "spectres",
+        "scipy",
+        "numpy"
     ],
     include_package_data=True,  
     #   package_data={'': ['moog_nosm/moog_nosm_FEB2017/']},
