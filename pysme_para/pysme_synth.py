@@ -253,7 +253,6 @@ def batch_synth(sme, line_list, N_line_chunk=2000, line_margin=2, parallel=False
     args = []
     for i in tqdm(range(N_chunk)):
         line_wav_start, line_wav_end = sub_wave_range[i]
-        print(line_wav_start, line_wav_end)
         wav_start, wav_end = sub_wave_range[i][0], sub_wave_range[i][1]
         args.append([sme, line_list, line_wav_start, line_wav_end, wav_start, wav_end, line_margin, pysme_out])
         if not parallel:
