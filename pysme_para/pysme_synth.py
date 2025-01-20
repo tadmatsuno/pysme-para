@@ -270,7 +270,7 @@ def batch_synth(sme, line_list, N_line_chunk=2000, line_margin=2, parallel=False
                 wav, flux = sub_sme.wave[0][wav_indices], sub_sme.synth[0][wav_indices]
             else:
                 wav, flux = np.concatenate([wav, sub_sme.wave[0][wav_indices]]), np.concatenate([flux, sub_sme.synth[0][wav_indices]])
-            sub_sme_all.append(sub_sme)
+            # sub_sme_all.append(sub_sme)
 
     if parallel:
         results = Parallel(n_jobs=n_jobs, backend='loky')(delayed(synthesize_spectrum_pqdm)(*ele) for ele in tqdm(args))
@@ -284,7 +284,7 @@ def batch_synth(sme, line_list, N_line_chunk=2000, line_margin=2, parallel=False
     if np.all(wav != sme.wave[0]):
         raise ValueError
     
-    return wav, flux, sub_sme_all
+    return wav, flux
 
 def synthesize_spectrum_pqdm(sme, line_list, line_wav_start, line_wav_end, wav_start, wav_end, line_margin, pysme_out):
     sub_sme = deepcopy(sme)
@@ -300,6 +300,6 @@ def synthesize_spectrum_pqdm(sme, line_list, line_wav_start, line_wav_end, wav_s
 
     wav_indices = (sub_sme.wave >= wav_start) & (sub_sme.wave < wav_end)
     wav, flux = sub_sme.wave[0][wav_indices], sub_sme.synth[0][wav_indices]
-    # del sub_sme
+    del sub_sme
 
-    return wav, flux, sub_sme
+    return wav, flux
