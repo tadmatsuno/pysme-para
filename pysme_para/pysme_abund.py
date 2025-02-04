@@ -147,6 +147,10 @@ def abund_fit(ele, ion, wav, flux, flux_uncs, fit_range, R, teff, logg, m_h, vmi
               spec_syn, synth_margin=2,
               save_path=None, plot=False, atmo=None, normalization=False, nlte=False):
 
+    '''
+    Fit the abundance of a single line.
+    '''
+
     # Crop the spectra 
     indices = (wav >= fit_range[0]-synth_margin) & (wav <= fit_range[1]+synth_margin)
     wav = wav[indices]
@@ -186,11 +190,13 @@ def abund_fit(ele, ion, wav, flux, flux_uncs, fit_range, R, teff, logg, m_h, vmi
     fit_flag = 'normal'
     
     # Calculate the EW
-    EW_all = np.trapz(1-sme_fit.synth[0], sme_fit.wave[0])
+    indices = (sme_fit.wave[0] >= fit_range[0]) & (sme_fit.wave[0] <= fit_range[1])
+    EW_all = np.trapz(1-sme_fit.synth[0][indices], sme_fit.wave[0][indices]) * 1000
     best_fit_synth = sme_fit.synth[0].copy()
     sme_fit.linelist = use_list[use_list['species'] == f'{ele} {ion}']
     sme_fit = synthesize_spectrum(sme_fit)
-    EW = (EW_all - np.trapz(1-sme_fit.synth[0], sme_fit.wave[0])) * 1000
+    # EW = (EW_all - np.trapz(1-sme_fit.synth[0][indices], sme_fit.wave[0][indices]) * 1000)
+    # print(EW_all, EW)
     sme_fit.linelist = use_list
     if sme_fit.fitresults['fit_uncertainties'][0] < 8:
         sme_fit.abund[ele] += sme_fit.fitresults['fit_uncertainties'][0] - sme_fit.monh
@@ -199,11 +205,12 @@ def abund_fit(ele, ion, wav, flux, flux_uncs, fit_range, R, teff, logg, m_h, vmi
         sme_fit.abund[ele] -= 2*sme_fit.fitresults['fit_uncertainties'][0] + sme_fit.monh
         sme_fit = synthesize_spectrum(sme_fit)
         minus_fit_synth = sme_fit.synth[0].copy()
-        diff_EW = np.mean(flux_uncs[(wav >= fit_range[0]) & (wav <= fit_range[1])])/2 * 1000
-        if EW <= 2*diff_EW:
+        sigma_EW = (np.trapz(1-plus_fit_synth[indices], sme_fit.wave[0][indices]) - np.trapz(1-minus_fit_synth[indices], sme_fit.wave[0][indices])) / 2 * 1000
+        # diff_EW = np.mean(flux_uncs[(wav >= fit_range[0]) & (wav <= fit_range[1])])/2 * 1000
+        if EW_all <= 3*sigma_EW:
             fit_flag = 'upper_limit'
     else:
-        diff_EW = np.nan
+        sigma_EW = np.nan
         fit_flag = 'error'
 
 
@@ -218,8 +225,9 @@ def abund_fit(ele, ion, wav, flux, flux_uncs, fit_range, R, teff, logg, m_h, vmi
         plt.title(f'{ele} {ion} fitting')
 
         plt.subplot(212)
-        plt.fill_between(sme_fit.wave[0], sme_fit.spec[0]-sme_fit.uncs[0], sme_fit.spec[0]+sme_fit.uncs[0], label='', alpha=0.3)
-        plt.plot(sme_fit.wave[0], sme_fit.spec[0], label='Oberved spectra')
+        # plt.fill_between(sme_fit.wave[0], sme_fit.spec[0]-sme_fit.uncs[0], sme_fit.spec[0]+sme_fit.uncs[0], label='', alpha=0.3)
+        # plt.plot(sme_fit.wave[0], sme_fit.spec[0], label='Oberved spectra')
+        plt.errorbar(sme_fit.wave[0], sme_fit.spec[0], yerr=sme_fit.uncs[0], fmt='.')
         plt.plot(sme_fit.wave[0], best_fit_synth, label='Synthesized spectra')
         if sme_fit.fitresults['fit_uncertainties'][0] < 8:
             plt.plot(sme_fit.wave[0], plus_fit_synth, label='', c='C1', ls='--')
@@ -227,7 +235,7 @@ def abund_fit(ele, ion, wav, flux, flux_uncs, fit_range, R, teff, logg, m_h, vmi
         
         plt.axvspan(*fit_range, color='C1', alpha=0.2)
         if sme_fit.fitresults['fit_uncertainties'][0] < 8:
-            plt.title(f"Fitted A({ele})={sme_fit.fitresults['values'][0]:.3f}$\pm${sme_fit.fitresults['fit_uncertainties'][0]:.3f}, EW={EW:.2f} m$\mathrm{{\AA}}$, $\sigma_f${diff_EW:.2f} m$\mathrm{{\AA}}$")
+            plt.title(f"Fitted A({ele})={sme_fit.fitresults['values'][0]:.3f}$\pm${sme_fit.fitresults['fit_uncertainties'][0]:.3f}, $\mathrm{{EW_{{synth, all}}}}$={EW_all:.2f}$\pm${sigma_EW:.2f} m$\mathrm{{\AA}}$, {fit_flag}")
         else:
             plt.title(f"Fitted A({ele})={sme_fit.fitresults['values'][0]:.3f}$\pm${sme_fit.fitresults['fit_uncertainties'][0]:.3f}, bad fitting")
         plt.legend()
@@ -239,18 +247,25 @@ def abund_fit(ele, ion, wav, flux, flux_uncs, fit_range, R, teff, logg, m_h, vmi
     
     fitresults = copy(sme_fit.fitresults)
     del sme_fit
-    return (fitresults, EW, diff_EW, fit_flag)
+    return (fitresults, EW_all, sigma_EW, fit_flag)
 
 def plot_average_abun(ele, fit_line_group_ele, ion_fit, result_folder, standard_value=None):
 
-    plt.figure(figsize=(13, 4))
-
+    plt.figure(figsize=(13, 4), dpi=150)
+    color_i = 0
     for ion in ion_fit:
-        indices = fit_line_group_ele['fit_result']['ioni_state'] == ion
-        plt.scatter(fit_line_group_ele['fit_result'].index[indices], fit_line_group_ele['fit_result'].loc[indices, f'A({ele})'], zorder=2, label=f'{ele} {ion} line')
+        indices = (fit_line_group_ele['fit_result']['ioni_state'] == ion) & (fit_line_group_ele['fit_result']['flag'] == 'normal')
+        plt.scatter(fit_line_group_ele['fit_result'].index[indices], fit_line_group_ele['fit_result'].loc[indices, f'A({ele})'], 
+                    zorder=2, label=f'{ele} {ion} line', c=f'C{color_i}')
+        plt.errorbar(fit_line_group_ele['fit_result'].index[indices], fit_line_group_ele['fit_result'].loc[indices, f'A({ele})'], 
+                 yerr=fit_line_group_ele['fit_result'].loc[indices, f'err_A({ele})'], fmt='.', zorder=1, c=f'C{color_i}', alpha=1)
+        indices = (fit_line_group_ele['fit_result']['ioni_state'] == ion) & (fit_line_group_ele['fit_result']['flag'] == 'upper_limit')
+        plt.errorbar(fit_line_group_ele['fit_result'].index[indices], fit_line_group_ele['fit_result'].loc[indices, f'A({ele})']+fit_line_group_ele['fit_result'].loc[indices, f'err_A({ele})'],
+                     yerr=fit_line_group_ele['fit_result'].loc[indices, f'err_A({ele})'],
+                     uplims=fit_line_group_ele['fit_result'].loc[indices, f'err_A({ele})'],
+                     marker='_', markersize=10, ls='none')
+        color_i += 1
     plt.ylim(plt.ylim())
-    plt.errorbar(fit_line_group_ele['fit_result'].index, fit_line_group_ele['fit_result'][f'A({ele})'], 
-                 yerr=fit_line_group_ele['fit_result'][f'err_A({ele})'], fmt='.', zorder=1, color='gray', alpha=0.5)
     
     if standard_value is not None:
         plt.axhline(standard_value, c='C3', label=f'Standard value: {standard_value:.2f}', ls='--')

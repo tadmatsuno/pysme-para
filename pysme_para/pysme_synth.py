@@ -88,6 +88,9 @@ def get_cdepth_range(sme, line_list, N_line_chunk=2000, parallel=False, n_jobs=5
     line_list._lines.loc[indices, 'line_range_s'] = line_list._lines.loc[indices, 'wlcent']-0.005
     line_list._lines.loc[indices, 'line_range_e'] = line_list._lines.loc[indices, 'wlcent']+0.005
 
+    # Write the stellar parameters used here to the line list
+    line_list.cdepth_range_paras = [sme.teff, sme.logg, sme.monh, sme.vmic]
+
     return line_list
 
 
@@ -249,11 +252,12 @@ def batch_synth(sme, line_list, N_line_chunk=2000, line_margin=2, parallel=False
 
     N_chunk = len(sub_wave_range)
 
-    sub_sme_all = []
+    # sub_sme_all = []
     args = []
     for i in tqdm(range(N_chunk)):
         line_wav_start, line_wav_end = sub_wave_range[i]
         wav_start, wav_end = sub_wave_range[i][0], sub_wave_range[i][1]
+        # print(wav_start, wav_end)
         args.append([sme, line_list, line_wav_start, line_wav_end, wav_start, wav_end, line_margin, pysme_out])
         if not parallel:
             sub_sme = deepcopy(sme)
@@ -274,11 +278,12 @@ def batch_synth(sme, line_list, N_line_chunk=2000, line_margin=2, parallel=False
 
     if parallel:
         results = Parallel(n_jobs=n_jobs, backend='loky')(delayed(synthesize_spectrum_pqdm)(*ele) for ele in tqdm(args))
+        # results = pqdm(args, synthesize_spectrum_pqdm, n_jobs=n_jobs)
         wav = [item[0] for item in results]
         wav = np.concatenate(wav)
         flux = [item[1] for item in results]
         flux = np.concatenate(flux)
-        sub_sme_all = [item[2] for item in results]
+        # sub_sme_all = [item[2] for item in results]
 
     # Merge the spectra
     if np.all(wav != sme.wave[0]):
