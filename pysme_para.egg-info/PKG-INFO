@@ -12,3 +12,8 @@ Classifier: Operating System :: OS Independent
 Classifier: Development Status :: 2 - Pre-Alpha
 Classifier: Topic :: Scientific/Engineering :: Astronomy
 Requires-Python: >=3.5
+Requires-Dist: pysme-astro
+Requires-Dist: pqdm
+Requires-Dist: spectres
+Requires-Dist: scipy
+Requires-Dist: numpy

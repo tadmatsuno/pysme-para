@@ -1,0 +1,5 @@
+pysme-astro
+pqdm
+spectres
+scipy
+numpy

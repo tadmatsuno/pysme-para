@@ -2,11 +2,14 @@
 requirements.txt
 setup.py
 pysme_para/__init__.py
+pysme_para/_pysme_abund_old.py
 pysme_para/pysme_abund.py
 pysme_para/pysme_para.py
 pysme_para/pysme_synth.py
+pysme_para/util.py
 pysme_para.egg-info/PKG-INFO
 pysme_para.egg-info/SOURCES.txt
 pysme_para.egg-info/dependency_links.txt
 pysme_para.egg-info/not-zip-safe
+pysme_para.egg-info/requires.txt
 pysme_para.egg-info/top_level.txt

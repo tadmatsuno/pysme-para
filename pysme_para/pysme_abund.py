@@ -24,10 +24,11 @@ def find_line_groups(wave, ele_fit, ion_fit, line_list, v_broad, margin_ratio=2)
             fit_line_group_single = []
             for i in line_list[line_list['species'] == f'{ele} {ion}'].index:
                 line_wav = line_list._lines.loc[i, 'wlcent']
-                fit_line_group_single.append([line_wav * (1-margin_ratio*v_broad / 3e5), line_wav * (1+margin_ratio*v_broad / 3e5)])
+                line_cdepth = line_list._lines.loc[i, 'central_depth']
+                fit_line_group_single.append([line_wav, line_cdepth, line_wav * (1-margin_ratio*v_broad / 3e5), line_wav * (1+margin_ratio*v_broad / 3e5)])
             
             # Remove the line group outside the observed spectra
-            fit_line_group_single = [ele for ele in fit_line_group_single if ele[0] >= np.min(wave) and ele[1] <= np.max(wave) and len(wave[(wave>=ele[0]) & (wave<=ele[1])]) > 1]
+            fit_line_group_single = [ele for ele in fit_line_group_single if ele[2] >= np.min(wave) and ele[3] <= np.max(wave) and len(wave[(wave>=ele[2]) & (wave<=ele[3])]) > 1]
             # Merge the line_group if they are connected
             fit_line_group_single.sort(key=lambda x: x[0])
             merged_ranges = []
@@ -37,12 +38,20 @@ def find_line_groups(wave, ele_fit, ion_fit, line_list, v_broad, margin_ratio=2)
                 else:
                     last_range = merged_ranges[-1]
                     # 检查当前范围的起始值是否小于等于前一个范围的结束值
-                    if current_range[0] <= last_range[1]:
+                    # print(current_range[2])
+                    if current_range[2] <= last_range[3]:
                         # 更新已合并范围的结束值为当前范围和前一个范围的结束值的最大者
-                        last_range[1] = max(last_range[1], current_range[1])
+                        last_range[3] = max(last_range[3], current_range[3])
+                        # Append the line wavelength and central depth
+                        if type(last_range[0]) != list:
+                            last_range[0] = [last_range[0]]
+                        last_range[0].append(current_range[0])
+                        if type(last_range[1]) != list:
+                            last_range[1] = [last_range[1]]
+                        last_range[1].append(current_range[1])
                     else:
                         merged_ranges.append(current_range)
-            fit_line_group[ele][ion] = [{'wav_s':ele[0], 'wav_e':ele[1]} for ele in merged_ranges]
+            fit_line_group[ele][ion] = [{'wlcent':ele[0], 'central_depth':ele[1], 'wav_s':ele[2], 'wav_e':ele[3]} for ele in merged_ranges]
     return fit_line_group
 
 def get_sensitive_synth(wave, R, teff, logg, m_h, vmic, vmac, vsini, line_list, abund, ele_fit, ion_fit, fit_line_group, synth_margin=2):
@@ -120,32 +129,34 @@ def select_lines(fit_line_group, spec_syn, ele_fit, ion_fit, sensitivity_dominan
     # Calculate the line range parameters
     for ele in ele_fit:
         for ion in ion_fit:
-            for i in range(len(fit_line_group[ele][ion])):            
+            for i in range(len(fit_line_group[ele][ion])):
                 wav_range = [fit_line_group[ele][ion][i]['wav_s'], fit_line_group[ele][ion][i]['wav_e']]
                 
                 indices = (spec_syn['total']['wave'] >= wav_range[0]) & (spec_syn['total']['wave'] <= wav_range[1]) 
                 max_sensitivity = np.max(spec_syn[ele]['partial_derivative'][indices])
                 sensitivity_dominance = np.sum(spec_syn[ele]['partial_derivative'][indices]) / np.sum(spec_syn['total']['partial_derivative'][indices]) 
-                line_dominance = np.sum(1 - spec_syn[ele]['ele_only'][ion][indices]) / np.sum(1 - spec_syn['total']['flux'][indices]) 
+                line_dominance = np.sum(1 - spec_syn[ele]['ele_only'][ion][indices]) / np.sum(1 - spec_syn['total']['flux'][indices])
+                line_max_depth =  np.max(1 - spec_syn[ele]['ele_only'][ion][indices])
                 fit_line_group[ele][ion][i]['max_sensitivity'] = max_sensitivity
                 fit_line_group[ele][ion][i]['sensitivity_dominance'] = sensitivity_dominance
                 fit_line_group[ele][ion][i]['line_dominance'] = line_dominance
+                fit_line_group[ele][ion][i]['line_max_depth'] = line_max_depth
             if len(fit_line_group[ele][ion]) > 0:
                 fit_line_group[ele][ion] = pd.DataFrame(fit_line_group[ele][ion])
             else:
-                fit_line_group[ele][ion] = pd.DataFrame(pd.DataFrame(columns=['wav_s', 'wav_e', 'max_sensitivity', 'sensitivity_dominance', 'line_dominance']))
+                fit_line_group[ele][ion] = pd.DataFrame(pd.DataFrame(columns=['wav_s', 'wav_e', 'max_sensitivity', 'sensitivity_dominance', 'line_dominance', 'line_max_depth']))
 
     # Select the lines
     for ele in ele_fit:
         for ion in ion_fit:
-            indices = (fit_line_group[ele][ion]['sensitivity_dominance'] >= sensitivity_dominance_thres) & (fit_line_group[ele][ion]['line_dominance'] >= line_dominance_thres)
+            indices = (fit_line_group[ele][ion]['sensitivity_dominance'] >= sensitivity_dominance_thres) & (fit_line_group[ele][ion]['line_dominance'] >= line_dominance_thres) & (fit_line_group[ele][ion]['line_dominance'] < 1) & (fit_line_group[ele][ion]['line_max_depth'] > 0.003*2)
             fit_line_group[ele][ion] = fit_line_group[ele][ion][indices].sort_values('max_sensitivity', ascending=False)[:max_line_num].reset_index(drop=True)
 
     return fit_line_group
 
-def abund_fit(ele, ion, wav, flux, flux_uncs, fit_range, R, teff, logg, m_h, vmic, vmac, vsini, abund, use_list, 
-              spec_syn, synth_margin=2,
-              save_path=None, plot=False, atmo=None, normalization=False, nlte=False):
+def abund_fit(ele, ion, wav, flux, flux_uncs, line_wav, fit_range, R, teff, logg, m_h, vmic, vmac, vsini, abund, use_list, 
+              spec_syn, synth_margin=5,
+              save_path=None, plot=False, atmo=None, normalization=False, nlte=False, fit_rv=False, telluric_spec=None, max_telluric_depth_thres=0.1):
 
     '''
     Fit the abundance of a single line.
@@ -156,6 +167,8 @@ def abund_fit(ele, ion, wav, flux, flux_uncs, fit_range, R, teff, logg, m_h, vmi
     wav = wav[indices]
     flux = flux[indices]
     flux_uncs = flux_uncs[indices]
+    if telluric_spec is not None:
+        telluric_spec = telluric_spec[indices]
     # Crop the line list
     use_list = use_list[(use_list['line_range_e'] > fit_range[0]-synth_margin) & (use_list['line_range_s'] < fit_range[1]+synth_margin)]
     
@@ -172,6 +185,8 @@ def abund_fit(ele, ion, wav, flux, flux_uncs, fit_range, R, teff, logg, m_h, vmi
     mask = np.zeros_like(sme_fit.wave[0], dtype=int)
     mask[indices] = 1
     sme_fit.mask = mask
+    if telluric_spec is not None:
+        max_telluric_depth = 1 - np.min(telluric_spec[indices])
 
     if nlte:
         sme_fit.nlte.set_nlte(ele)
@@ -186,7 +201,10 @@ def abund_fit(ele, ion, wav, flux, flux_uncs, fit_range, R, teff, logg, m_h, vmi
         sme_fit.spec = sme_fit.spec[0] / con_level
         sme_fit.uncs = sme_fit.uncs[0] / con_level
 
-    sme_fit = solve(sme_fit, [f'abund {ele}'])
+    if fit_rv:
+        sme_fit = solve(sme_fit, [f'abund {ele}', 'vrad'])
+    else:
+        sme_fit = solve(sme_fit, [f'abund {ele}'])
     fit_flag = 'normal'
     
     # Calculate the EW
@@ -213,6 +231,8 @@ def abund_fit(ele, ion, wav, flux, flux_uncs, fit_range, R, teff, logg, m_h, vmi
         sigma_EW = np.nan
         fit_flag = 'error'
 
+    if telluric_spec is not None and max_telluric_depth > max_telluric_depth_thres:
+        fit_flag = 'telluric_blended'
 
     if plot:
         plt.figure(figsize=(10, 6))
@@ -221,14 +241,26 @@ def abund_fit(ele, ion, wav, flux, flux_uncs, fit_range, R, teff, logg, m_h, vmi
         plt.fill_between(spec_syn['total']['wave'][indices], spec_syn[ele]['minus'][indices], spec_syn[ele]['plus'][indices], label=f"Synthetic spectra with [{ele}/Fe]$\pm$0.1")
         plt.plot(spec_syn['total']['wave'][indices], spec_syn[ele]['ele_only'][ion][indices], c='C1', label=f"Synthetic spectra with {ele} {ion} line only")
         plt.axvspan(*fit_range, color='C1', alpha=0.2)
+        print(line_wav)
+        if type(line_wav) == list:
+            for line_wav_single in line_wav:
+                plt.axvline(line_wav_single, c='C1', ls='--', label='', alpha=0.7)
+        else:
+            plt.axvline(line_wav, c='C1', ls='--', label='', alpha=0.7)
         plt.legend()
-        plt.title(f'{ele} {ion} fitting')
+        plt.title(f'{ele} {ion} ({line_wav} $\mathrm{{\AA}}$)')
 
         plt.subplot(212)
-        # plt.fill_between(sme_fit.wave[0], sme_fit.spec[0]-sme_fit.uncs[0], sme_fit.spec[0]+sme_fit.uncs[0], label='', alpha=0.3)
-        # plt.plot(sme_fit.wave[0], sme_fit.spec[0], label='Oberved spectra')
-        plt.errorbar(sme_fit.wave[0], sme_fit.spec[0], yerr=sme_fit.uncs[0], fmt='.')
-        plt.plot(sme_fit.wave[0], best_fit_synth, label='Synthesized spectra')
+        plt.errorbar(sme_fit.wave[0], sme_fit.spec[0], yerr=sme_fit.uncs[0], fmt='.', label='Observed spectrum')
+        plt.plot(sme_fit.wave[0], best_fit_synth, label='Synthesized spectrum')
+        if type(line_wav) == list:
+            for line_wav_single in line_wav:
+                plt.axvline(line_wav_single, c='C1', ls='--', label='', alpha=0.7)
+        else:
+            plt.axvline(line_wav, c='C1', ls='--', label='', alpha=0.7)
+        plt.ylim(plt.ylim())
+        if telluric_spec is not None:
+            plt.plot(wav, telluric_spec, label='Telluric spectrum', c='gray', alpha=0.5)
         if sme_fit.fitresults['fit_uncertainties'][0] < 8:
             plt.plot(sme_fit.wave[0], plus_fit_synth, label='', c='C1', ls='--')
             plt.plot(sme_fit.wave[0], minus_fit_synth, label='', c='C1', ls='--')
@@ -240,6 +272,7 @@ def abund_fit(ele, ion, wav, flux, flux_uncs, fit_range, R, teff, logg, m_h, vmi
             plt.title(f"Fitted A({ele})={sme_fit.fitresults['values'][0]:.3f}$\pm${sme_fit.fitresults['fit_uncertainties'][0]:.3f}, bad fitting")
         plt.legend()
         plt.xlabel('Wavelength ($\mathrm{\AA}$)')
+
         plt.tight_layout()
         if save_path is not None:
             plt.savefig(f"{save_path}_{fit_range[0]:.3f}-{fit_range[1]:.3f}_line_fit.pdf")
@@ -255,15 +288,19 @@ def plot_average_abun(ele, fit_line_group_ele, ion_fit, result_folder, standard_
     color_i = 0
     for ion in ion_fit:
         indices = (fit_line_group_ele['fit_result']['ioni_state'] == ion) & (fit_line_group_ele['fit_result']['flag'] == 'normal')
-        plt.scatter(fit_line_group_ele['fit_result'].index[indices], fit_line_group_ele['fit_result'].loc[indices, f'A({ele})'], 
-                    zorder=2, label=f'{ele} {ion} line', c=f'C{color_i}')
+        plt.scatter(fit_line_group_ele['fit_result'].index[indices], fit_line_group_ele['fit_result'].loc[indices, f'A({ele})'], zorder=2, label=f'{ele} {ion} line', c=f'C{color_i}')
         plt.errorbar(fit_line_group_ele['fit_result'].index[indices], fit_line_group_ele['fit_result'].loc[indices, f'A({ele})'], 
                  yerr=fit_line_group_ele['fit_result'].loc[indices, f'err_A({ele})'], fmt='.', zorder=1, c=f'C{color_i}', alpha=1)
+        
+        indices = (fit_line_group_ele['fit_result']['ioni_state'] == ion) & (fit_line_group_ele['fit_result']['flag'] != 'normal') & (fit_line_group_ele['fit_result']['flag'] != 'upper_limit')
+        plt.scatter(fit_line_group_ele['fit_result'].index[indices], fit_line_group_ele['fit_result'].loc[indices, f'A({ele})'], zorder=3, label=f'', c='red', marker='x')
+
         indices = (fit_line_group_ele['fit_result']['ioni_state'] == ion) & (fit_line_group_ele['fit_result']['flag'] == 'upper_limit')
         plt.errorbar(fit_line_group_ele['fit_result'].index[indices], fit_line_group_ele['fit_result'].loc[indices, f'A({ele})']+fit_line_group_ele['fit_result'].loc[indices, f'err_A({ele})'],
                      yerr=fit_line_group_ele['fit_result'].loc[indices, f'err_A({ele})'],
                      uplims=fit_line_group_ele['fit_result'].loc[indices, f'err_A({ele})'],
                      marker='_', markersize=10, ls='none')
+                     
         color_i += 1
     plt.ylim(plt.ylim())
     
@@ -282,7 +319,7 @@ def plot_average_abun(ele, fit_line_group_ele, ion_fit, result_folder, standard_
     plt.savefig(f'{result_folder}/{ele}/{ele}-fit.pdf')
     plt.close()
 
-def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, line_list, ele_fit, ion_fit=[1, 2], result_folder=None, line_mask=None, abund=None, atmo=None, plot=False, standard_values=None, abund_record=None, save=False, overwrite=False, line_margin=2, central_depth_thres=0.01, cal_central_depth=True, sensitivity_dominance_thres=0.3, line_dominance_thres=0.3, max_line_num=10, normalization=False):
+def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, line_list, ele_fit, ion_fit=[1, 2], result_folder=None, line_mask_remove=None, abund=None, atmo=None, plot=False, standard_values=None, abund_record=None, save=False, overwrite=False, line_margin=2, central_depth_thres=0.01, cal_central_depth=True, sensitivity_dominance_thres=0.3, line_dominance_thres=0.3, max_line_num=10, normalization=False, fit_rv=False, telluric_spec=None, max_telluric_depth_thres=None):
     '''
     The main function for determining abundances using pysme.
     Input: observed wavelength, normalized flux, teff, logg, [M/H], vmic, vmac, vsini, line_list, pysme initial abundance list, line mask of wavelength to be removed.
@@ -332,7 +369,16 @@ def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, lin
     line_list = line_list[(line_list['central_depth'] > central_depth_thres) | (line_list['species'] == 'Li 1')]
 
     # Generate synthetic and sensitive spectra using current parameters
-    fit_line_group = find_line_groups(wave, ele_fit, ion_fit, line_list, v_broad)
+    if line_mask_remove is not None:
+        if type(line_mask_remove[0]) != list:
+            line_mask_remove = [line_mask_remove]
+        indices = wave > 0
+        for mask in line_mask_remove:
+            indices &= (wave < mask[0]) | (wave > mask[1])
+        fit_line_group = find_line_groups(wave[indices], ele_fit, ion_fit, line_list, v_broad)
+    else:
+        fit_line_group = find_line_groups(wave, ele_fit, ion_fit, line_list, v_broad)
+    
     spec_syn = get_sensitive_synth(wave, R, teff, logg, m_h, vmic, vmac, vsini, line_list, abund, ele_fit, ion_fit, fit_line_group)
     fit_line_group = select_lines(fit_line_group, spec_syn, ele_fit, ion_fit, sensitivity_dominance_thres=sensitivity_dominance_thres, line_dominance_thres=line_dominance_thres, max_line_num=max_line_num)
 
@@ -364,8 +410,10 @@ def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, lin
                     fit_line_group[ele][ion] = pd.DataFrame(pd.DataFrame(columns=list(fit_line_group[ele][ion].columns) + [f'A({ele})', f'err_A({ele})', 'EW', 'diff_EW', 'flag']))
                 for i in fit_line_group[ele][ion].index:
                     fit_range = [fit_line_group[ele][ion].loc[i, 'wav_s'],  fit_line_group[ele][ion].loc[i, 'wav_e']]
-                    fitresults, EW, diff_EW, fit_flag = abund_fit(ele, ion, wave, flux, flux_err, fit_range, R, teff, logg, m_h, vmic, vmac, vsini, abund, line_list, spec_syn,
-                                                                    save_path=f"{result_folder}/{ele}/{ele}_{ion}", atmo=None, plot=plot, normalization=normalization)
+                    line_wav = fit_line_group[ele][ion].loc[i, 'wlcent']
+                    fitresults, EW, diff_EW, fit_flag = abund_fit(ele, ion, wave, flux, flux_err, line_wav, fit_range, R, teff, logg, m_h, vmic, vmac, vsini, abund, line_list, spec_syn,
+                                                                    save_path=f"{result_folder}/{ele}/{ele}_{ion}", atmo=None, plot=plot, normalization=normalization, fit_rv=fit_rv, telluric_spec=telluric_spec,
+                                                                    max_telluric_depth_thres=max_telluric_depth_thres)
                     fit_result.append({f'A({ele})':fitresults.values[0], f'err_A({ele})':fitresults.fit_uncertainties[0], 'EW':EW, 'diff_EW':diff_EW, 'flag':fit_flag})
                 fit_line_group[ele][ion] = pd.concat([fit_line_group[ele][ion], pd.DataFrame(fit_result)], axis=1)
 
