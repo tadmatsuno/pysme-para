@@ -120,7 +120,7 @@ def get_sensitive_synth(wave, R, teff, logg, m_h, vmic, vmac, vsini, line_list, 
     
     return spec_syn
 
-def select_lines(fit_line_group, spec_syn, ele_fit, ion_fit, sensitivity_dominance_thres=0.5, line_dominance_thres=0.5, max_line_num=10):
+def select_lines(fit_line_group, spec_syn, ele_fit, ion_fit, sensitivity_dominance_thres=0.5, line_dominance_thres=0.5, max_line_num=10, is_thres_relative = True, min_line_num=3):
 
     '''
     Select lines
@@ -147,11 +147,34 @@ def select_lines(fit_line_group, spec_syn, ele_fit, ion_fit, sensitivity_dominan
                 fit_line_group[ele][ion] = pd.DataFrame(pd.DataFrame(columns=['wav_s', 'wav_e', 'max_sensitivity', 'sensitivity_dominance', 'line_dominance', 'line_max_depth']))
 
     # Select the lines
+    sensitivity_dominance_thres_in = sensitivity_dominance_thres
+    line_dominance_thres_in = line_dominance_thres
     for ele in ele_fit:
         for ion in ion_fit:
-            indices = (fit_line_group[ele][ion]['sensitivity_dominance'] >= sensitivity_dominance_thres) & (fit_line_group[ele][ion]['line_dominance'] >= line_dominance_thres) & (fit_line_group[ele][ion]['line_dominance'] < 1) & (fit_line_group[ele][ion]['line_max_depth'] > 0.003*2)
+            # You are now allowed to define the thresholds as relative
+            sensitivity_dominance_thres = sensitivity_dominance_thres_in
+            line_dominance_thres = line_dominance_thres_in
+            if is_thres_relative:
+                max_sensitivity_dominance = np.max(fit_line_group[ele][ion]['sensitivity_dominance'])
+                max_line_dominance = np.max(fit_line_group[ele][ion]['line_dominance'])
+                print(max_line_dominance,max_sensitivity_dominance)
+                sensitivity_dominance_thres = max_sensitivity_dominance * sensitivity_dominance_thres
+                line_dominance_thres = max_line_dominance * line_dominance_thres
+            if (min_line_num > 0):
+                dominances = np.minimum(fit_line_group[ele][ion]['sensitivity_dominance']/sensitivity_dominance_thres, 
+                                        fit_line_group[ele][ion]['line_dominance']/line_dominance_thres)
+                dominances = dominances[(fit_line_group[ele][ion]['line_dominance'] <=1) &\
+                                        (fit_line_group[ele][ion]['line_max_depth'] > 0.003*2)]
+                if len(dominances) > 0:
+                    corrfactor_dominance = np.minimum(np.sort(dominances)[-np.minimum(min_line_num,len(dominances))], 1.0) # To ensure that at least min_line_num lines are selected
+                    print(len(dominances),corrfactor_dominance,min_line_num)
+                    sensitivity_dominance_thres = corrfactor_dominance * sensitivity_dominance_thres
+                    line_dominance_thres = corrfactor_dominance * line_dominance_thres
+            indices = (fit_line_group[ele][ion]['sensitivity_dominance'] >= sensitivity_dominance_thres) &\
+                (fit_line_group[ele][ion]['line_dominance'] >= line_dominance_thres) &\
+                (fit_line_group[ele][ion]['line_dominance'] <= 1) &\
+                (fit_line_group[ele][ion]['line_max_depth'] > 0.003*2)
             fit_line_group[ele][ion] = fit_line_group[ele][ion][indices].sort_values('max_sensitivity', ascending=False)[:max_line_num].reset_index(drop=True)
-
     return fit_line_group
 
 def abund_fit(ele, ion, wav, flux, flux_uncs, line_wav, fit_range, R, teff, logg, m_h, vmic, vmac, vsini, abund, use_list, 
@@ -319,7 +342,12 @@ def plot_average_abun(ele, fit_line_group_ele, ion_fit, result_folder, standard_
     plt.savefig(f'{result_folder}/{ele}/{ele}-fit.pdf')
     plt.close()
 
-def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, line_list, ele_fit, ion_fit=[1, 2], result_folder=None, line_mask_remove=None, abund=None, atmo=None, plot=False, standard_values=None, abund_record=None, save=False, overwrite=False, line_margin=2, central_depth_thres=0.01, cal_central_depth=True, sensitivity_dominance_thres=0.3, line_dominance_thres=0.3, max_line_num=10, normalization=False, fit_rv=False, telluric_spec=None, max_telluric_depth_thres=None):
+def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, line_list, ele_fit, ion_fit=[1, 2], 
+                result_folder=None, line_mask_remove=None, abund=None, atmo=None, plot=False, standard_values=None, 
+                abund_record=None, save=False, overwrite=False, line_margin=2, central_depth_thres=0.01, 
+                cal_central_depth=True, sensitivity_dominance_thres=0.3, line_dominance_thres=0.3, max_line_num=10, 
+                min_line_num = 0, is_thres_relative=False,
+                normalization=False, fit_rv=False, telluric_spec=None, max_telluric_depth_thres=None):
     '''
     The main function for determining abundances using pysme.
     Input: observed wavelength, normalized flux, teff, logg, [M/H], vmic, vmac, vsini, line_list, pysme initial abundance list, line mask of wavelength to be removed.
@@ -380,7 +408,7 @@ def pysme_abund(wave, flux, flux_err, R, teff, logg, m_h, vmic, vmac, vsini, lin
         fit_line_group = find_line_groups(wave, ele_fit, ion_fit, line_list, v_broad)
     
     spec_syn = get_sensitive_synth(wave, R, teff, logg, m_h, vmic, vmac, vsini, line_list, abund, ele_fit, ion_fit, fit_line_group)
-    fit_line_group = select_lines(fit_line_group, spec_syn, ele_fit, ion_fit, sensitivity_dominance_thres=sensitivity_dominance_thres, line_dominance_thres=line_dominance_thres, max_line_num=max_line_num)
+    fit_line_group = select_lines(fit_line_group, spec_syn, ele_fit, ion_fit, sensitivity_dominance_thres=sensitivity_dominance_thres, line_dominance_thres=line_dominance_thres, max_line_num=max_line_num, is_thres_relative=is_thres_relative, min_line_num=min_line_num)
 
     time_select_line_e = time.time()
 
