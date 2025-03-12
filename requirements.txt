@@ -3,3 +3,4 @@ pqdm
 spectres
 scipy
 numpy
+joblib
